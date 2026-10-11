@@ -30,7 +30,8 @@ pre{white-space:pre-wrap;font-size:12px;overflow-x:auto}
 <div class="row"><label>E<input id="E" type="number" step="any"></label><label>Unidad de E<select id="eu"></select></label><label>I<input id="I" type="number" step="any"></label><label>Unidad de I<select id="iu"></select></label></div>
 </div>
 <div class="card"><h2>2. Apoyos</h2><div class="tw" id="sup"></div><div class="row"><button class="g" onclick="D.sup.push({t:'roller',x:0});tbl();run()">+ Apoyo</button></div></div>
-<div class="card"><h2>3. Cargas</h2><div class="tw" id="lds"></div>
+<div class="card"><h2>3. Articulaciones internas (M = 0)</h2><div class="tw" id="hng"></div><div class="row"><button class="g" onclick="D.hinges.push({x:0});tbl();run()">+ Articulación</button></div></div>
+<div class="card"><h2>4. Cargas</h2><div class="tw" id="lds"></div>
 <div class="row"><button class="g" onclick="addL('P')">+ Puntual vertical</button><button class="g" onclick="addL('H')">+ Puntual horizontal</button><button class="g" onclick="addL('M')">+ Momento</button><button class="g" onclick="addL('W')">+ Distribuida</button></div>
 <p class="hint">Signos: vertical ↑ positiva (↓ negativa), horizontal → positiva, momento horario ↻ positivo. En distribuidas, w₁ y w₂ son las intensidades en x₁ y x₂ (uniforme: w₁ = w₂; triangular: una es 0).</p></div>
 <div id="res"></div>
@@ -41,7 +42,7 @@ const LU={m:1,cm:.01,mm:.001,ft:.3048,in:.0254},FU={N:1,kN:1e3,kgf:9.80665,tonf:
 EU={GPa:1e9,MPa:1e6,'kgf/cm²':98066.5,'tonf/m²':9806.65,ksi:6894757,psi:6894.757},
 IU={'m⁴':1,'cm⁴':1e-8,'mm⁴':1e-12,'in⁴':4.162314e-7,'ft⁴':8.630975e-3};
 const fill=(id,o,d)=>$(id).innerHTML=Object.keys(o).map(k=>`<option ${k==d?'selected':''}>${k}</option>`).join('');
-const D={sup:[],loads:[]};let R=null,QX=null,DL=null;
+const D={sup:[],hinges:[],loads:[]};let R=null,QX=null,DL=null;
 const fmt=v=>{const a=Math.abs(v);return a<1e-12?'0':(a>=1e5||a<1e-3)?v.toExponential(3):String(+v.toPrecision(6))};
 const sp=n=>String(n).replace(/\d/g,d=>'⁰¹²³⁴⁵⁶⁷⁸⁹'[d]);
 const NM={P:'Puntual vertical',H:'Puntual horizontal',M:'Momento',W:'Distribuida'},ST=[['pin','Articulado'],['roller','Rodillo'],['fixed','Empotrado']];
@@ -51,6 +52,7 @@ function ex(n){const set=(l,f,d,e,i,L,E,I)=>{$('#lu').value=l;$('#fu').value=f;$
  QX=null;tbl();run()}
 function addL(t){D.loads.push({t,a:0,b:0,v:0,w:0});tbl();run()}
 function tbl(){
+ $('#hng').innerHTML=D.hinges.length?'<table><tr><th>x</th><th></th></tr>'+D.hinges.map((h,i)=>`<tr><td><input type="number" step="any" value="${h.x}" oninput="D.hinges[${i}].x=num(this);run()"></td><td><button class="g x" onclick="D.hinges.splice(${i},1);tbl();run()">✕</button></td></tr>`).join('')+'</table>':'';
  $('#sup').innerHTML='<table><tr><th>Tipo</th><th>x</th><th></th></tr>'+D.sup.map((s,i)=>`<tr><td><select onchange="D.sup[${i}].t=this.value;run()">${ST.map(o=>`<option value="${o[0]}" ${o[0]==s.t?'selected':''}>${o[1]}</option>`).join('')}</select></td><td><input type="number" step="any" value="${s.x}" oninput="D.sup[${i}].x=num(this);run()"></td><td><button class="g x" onclick="D.sup.splice(${i},1);tbl();run()">✕</button></td></tr>`).join('')+'</table>';
  $('#lds').innerHTML='<table><tr><th>Tipo</th><th>x / x₁</th><th>x₂</th><th>Valor / w₁</th><th>w₂</th><th></th></tr>'+D.loads.map((c,i)=>{const I=(k,p)=>`<input type="number" step="any" placeholder="${p}" value="${c[k]}" oninput="D.loads[${i}].${k}=num(this);run()">`,w=c.t=='W';
  return `<tr><td>${NM[c.t]}</td><td>${I('a','x')}</td><td>${w?I('b','x₂'):''}</td><td>${I('v',w?'w₁':'valor')}</td><td>${w?I('w','w₂'):''}</td><td><button class="g x" onclick="D.loads.splice(${i},1);tbl();run()">✕</button></td></tr>`}).join('')+'</table>'}
@@ -72,24 +74,26 @@ function solve(){
   if(c.t=='P')Vt.push([c.v*f,a,0]);else if(c.t=='H')Ht.push([c.v*f,a]);else if(c.t=='M')Mt.push([c.v*f*k,a,0]);
   else{if(!(b>a)||!ok(b))throw 'En cada carga distribuida, x₂ debe ser mayor que x₁ y estar dentro de la viga.';
    const w1=c.v*f/k,w2=c.w*f/k,q=(w2-w1)/(b-a);Vt.push([w1,a,1],[q/2,a,2],[-w2,b,1],[-q/2,b,2])}}
- const ev=(x,V,M,c1,c2)=>{let v=0,m=0,t=c1,y=c1*x+c2;
+ const ev=(x,V,M,c1,c2,J=[])=>{let v=0,m=0,t=c1,y=c1*x+c2;
   for(const [c,a,n] of V)if(x>=a){const d=x-a;v+=c*d**n;m+=c/(n+1)*d**(n+1);t+=c/((n+1)*(n+2))*d**(n+2);y+=c/((n+1)*(n+2)*(n+3))*d**(n+3)}
   for(const [c,a] of M)if(x>=a){const d=x-a;m+=c;t+=c*d;y+=c*d*d/2}
+  for(const [c,a] of J)if(x>=a){t+=c;y+=c*(x-a)}
   return [v,m,t,y]};
  const un=[];S.forEach(s=>{un.push({k:'R',x:s.x});if(s.t=='fixed')un.push({k:'M',x:s.x})});
- const nu=un.length+2,rows=[];S.forEach(s=>{rows.push([s.x,3]);if(s.t=='fixed')rows.push([s.x,2])});rows.push([L,0],[L,1]);
- const resp=(j,r)=>{const V=[],M=[];let c1=0,c2=0;if(j<un.length){const u=un[j];(u.k=='R'?V:M).push([1,u.x,0])}else if(j==un.length)c1=1;else c2=1;return ev(r[0],V,M,c1,c2)[r[1]]};
+ const Hg=D.hinges.map(h=>h.x*k);if(Hg.some(x=>!(x>0&&x<L)))throw 'Las articulaciones deben estar dentro de la viga (0 < x < L).';Hg.forEach(x=>un.push({k:'J',x}));
+ const nu=un.length+2,rows=[];S.forEach(s=>{rows.push([s.x,3]);if(s.t=='fixed')rows.push([s.x,2])});Hg.forEach(x=>rows.push([x,1]));rows.push([L,0],[L,1]);
+ const resp=(j,r)=>{const V=[],M=[],J=[];let c1=0,c2=0;if(j<un.length){const u=un[j];(u.k=='R'?V:u.k=='M'?M:J).push([1,u.x,0])}else if(j==un.length)c1=1;else c2=1;return ev(r[0],V,M,c1,c2,J)[r[1]]};
  const A=rows.map(r=>Array.from({length:nu},(_,j)=>resp(j,r))),bb=rows.map(r=>-ev(r[0],Vt,Mt,0,0)[r[1]]),sol=gauss(A,bb);
  if(!sol)throw 'La viga es inestable o está mal apoyada: usa un empotramiento o al menos 2 apoyos en posiciones distintas.';
- const Vf=Vt.slice(),Mf=Mt.slice();un.forEach((u,j)=>(u.k=='R'?Vf:Mf).push([sol[j],u.x,0]));
+ const Vf=Vt.slice(),Mf=Mt.slice(),Jf=[];un.forEach((u,j)=>(u.k=='R'?Vf:u.k=='M'?Mf:Jf).push([sol[j],u.x,0]));
  const c1=sol[un.length],c2=sol[un.length+1],sumH=Ht.reduce((s,h)=>s+h[0],0),hs=S.findIndex(s=>s.t!='roller'),Hf=Ht.slice(),warn=[];
  if(hs>=0)Hf.push([-sumH,S[hs].x]);else if(Math.abs(sumH)>1e-9)warn.push('Hay fuerzas horizontales pero ningún apoyo articulado o empotrado las resiste.');
  if(S.filter(s=>s.t!='roller').length>1)warn.push('Hay más de un apoyo articulado/empotrado: la fuerza horizontal se asigna al primero de la lista.');
  const Nf=x=>-Hf.reduce((s,h)=>s+(x>=h[1]?h[0]:0),0);
  const reac=[];let j=0;S.forEach((s,i)=>{const ry=sol[j++];let mr=null;if(s.t=='fixed')mr=sol[j++];reac.push({t:s.t,x:D.sup[i].x,ry:ry/f,rx:i==hs?-sumH/f:null,mr:mr==null?null:mr/(f*k)})});
  const xs=[];for(let i=0;i<=800;i++)xs.push(L*i/800);
- [...S.map(s=>s.x),...D.loads.flatMap(c=>c.t=='W'?[c.a*k,c.b*k]:[c.a*k])].forEach(c=>{xs.push(c);if(c>0)xs.push(c-L*1e-9)});xs.sort((a,b)=>a-b);
- const f4=x=>ev(x,Vf,Mf,c1,c2),sc=[1/f,1/(f*k),1/EI,1/EI/dk];
+ [...S.map(s=>s.x),...Hg,...D.loads.flatMap(c=>c.t=='W'?[c.a*k,c.b*k]:[c.a*k])].forEach(c=>{xs.push(c);if(c>0)xs.push(c-L*1e-9)});xs.sort((a,b)=>a-b);
+ const f4=x=>ev(x,Vf,Mf,c1,c2,Jf),sc=[1/f,1/(f*k),1/EI,1/EI/dk];
  const raw=xs.map(x=>f4(x)),Ys=[xs.map(x=>Nf(x)/f),raw.map(r=>r[0]/f),raw.map(r=>r[1]*sc[1]),raw.map(r=>r[2]*sc[2]),raw.map(r=>r[3]*sc[3])];
  const refine=q=>{const g=q-1,pts=xs.slice();
   for(let i=0;i<xs.length-1;i++){let a=xs[i],b=xs[i+1],ga=f4(a)[g],gb=f4(b)[g];
@@ -103,6 +107,7 @@ function solve(){
   const e=exs[i].map(p=>({x:p.x,v:cl(p.v)}));return {name:n[0],unit:n[1],col:n[2],Y:Ys[i].map(cl),mn:e[0],mx:e[1],ex:e.filter((p,q)=>p.v!=0&&!(q==1&&p.v==e[0].v))}});
  const g=lv=>{const T=[];Vf.forEach(([c,a,n])=>{let d=1;for(let j=1;j<=lv;j++)d*=n+j;T.push([c*k**n/f/d,a/k,n+lv])});
   if(lv>0)Mf.forEach(([c,a])=>{let d=1;for(let j=1;j<lv;j++)d*=j;T.push([c/(f*k)/d,a/k,lv-1])});
+  if(lv>=2)Jf.forEach(([c,a])=>T.push([c/(f*k*k),a/k,lv-2]));
   const m=Math.max(...T.map(t=>Math.abs(t[0])),1e-300);
   return T.filter(t=>Math.abs(t[0])>1e-9*m).map((t,i)=>(t[0]<0?' − ':i?' + ':'')+fmt(Math.abs(t[0]))+'⟨x'+(t[1]?'−'+fmt(t[1]):'')+'⟩'+sp(t[2])).join('')||'0'};
  const sg=v=>(v<0?' − ':' + ')+fmt(Math.abs(v)),K1=c1/(f*k*k),K2=c2/(f*k**3);
@@ -121,6 +126,7 @@ function beam(th,R){const W=720,l=64,r=16,y0=92,Lx=R.Ld,X=v=>l+v/Lx*(W-l-r),F='#
   else{o+=`<path d="M${x},${y0+3}l-11,${s.t=='pin'?18:15}h22z" fill="none" stroke="${th.t}" stroke-width="2"/>`;
    o+=s.t=='pin'?`<line x1="${x-15}" x2="${x+15}" y1="${y0+21}" y2="${y0+21}" stroke="${th.t}" stroke-width="2"/>`:`<circle cx="${x}" cy="${y0+22}" r="4" fill="none" stroke="${th.t}" stroke-width="2"/>`}
   o+=T(x,y0+46,fmt(s.x),th.m)});
+ D.hinges.forEach(h=>{o+=`<circle cx="${X(h.x)}" cy="${y0}" r="6" fill="${th.bg}" stroke="${th.t}" stroke-width="2"/>`+T(X(h.x),y0+22,fmt(h.x),th.m)});
  D.loads.forEach(c=>{const x=X(c.a);
   if(c.t=='P'){const d=c.v<0;o+=(d?Ar(x,y0-50,x,y0-4):Ar(x,y0+52,x,y0+4))+T(x,d?y0-54:y0+64,fmt(c.v)+' '+R.fu,F)}
   else if(c.t=='H'){const p=c.v>0;o+=(p?Ar(x-42,y0-16,x,y0-16):Ar(x+42,y0-16,x,y0-16))+T(p?x-21:x+21,y0-21,fmt(c.v)+' '+R.fu,F)}
@@ -140,7 +146,7 @@ function plot(th,s,R){const W=720,H=165,l=64,r=16,t=24,b=22,Lx=R.Ld;
  o+=`<polygon points="${X(0)},${Y(0)} ${pts} ${X(Lx)},${Y(0)}" fill="${s.col}" fill-opacity=".18"/><polyline points="${pts}" fill="none" stroke="${s.col}" stroke-width="2"/><line x1="${l}" x2="${W-r}" y1="${Y(0)}" y2="${Y(0)}" stroke="${th.t}"/>`+T(l-6,+Y(0)+4,'0',th.m,'end');
  s.ex.forEach(e=>{const x=+X(e.x),y=+Y(e.v);o+=`<circle cx="${x}" cy="${y}" r="3.5" fill="${s.col}"/>`+T(x,e.v>=0?y-7:y+16,fmt(e.v),th.t,x<l+45?'start':x>W-r-45?'end':'middle')});
  return o+T(l,H-5,'0',th.m,'start')+T(W-r,H-5,fmt(Lx)+' '+R.lu,th.m,'end')+'</svg>'}
-const LT={t:'#1b2330',m:'#6a7485',b:'#d3d9e2'},TH=()=>{const c=getComputedStyle(document.documentElement),g=n=>c.getPropertyValue(n).trim();return {t:g('--t')||LT.t,m:g('--m')||LT.m,b:g('--b')||LT.b}};
+const LT={t:'#1b2330',m:'#6a7485',b:'#d3d9e2',bg:'#fff'},TH=()=>{const c=getComputedStyle(document.documentElement),g=n=>c.getPropertyValue(n).trim();return {t:g('--t')||LT.t,m:g('--m')||LT.m,b:g('--b')||LT.b,bg:g('--c')||LT.bg}};
 const draw=(R,th)=>[beam(th,R),...R.S.map(s=>plot(th,s,R))];
 function show(R){const nm={pin:'Articulado',roller:'Rodillo',fixed:'Empotrado'};
  let h=R.warn.map(w=>`<p class="warn">⚠ ${w}</p>`).join('');
@@ -151,7 +157,7 @@ function show(R){const nm={pin:'Articulado',roller:'Rodillo',fixed:'Empotrado'};
  return h+`<div class="card"><h2>Ecuaciones (funciones de singularidad)</h2><pre>${R.eq}</pre></div>`}
 function qry(){if(!R)return;QX=num($('#qx'));if(QX<0||QX>R.Ld){$('#qo').textContent='x fuera de la viga.';return}
  const v=R.at(QX);$('#qo').innerHTML=`N = ${fmt(v[0])} ${R.fu}<br>V = ${fmt(v[1])} ${R.fu}<br>M = ${fmt(v[2])} ${R.fu}·${R.lu}<br>θ = ${fmt(v[3])} rad<br>y = ${fmt(v[4])} ${R.du}<br><span class="hint">En un salto (carga puntual) se muestra el valor justo a la derecha de x.</span>`}
-function run(){const o=$('#res');try{R=solve();if(QX==null)QX=+(R.Ld/2).toFixed(4);o.innerHTML=show(R);qry()}catch(e){R=null;const m=typeof e=='string'?e:'Error: '+e.message;o.innerHTML=(D.sup.length||D.loads.length)?`<p class="err">${m}</p>`:'<p class="hint">Ingresa la longitud, E, I y los apoyos de la viga para ver los resultados.</p>'}}
+function run(){const o=$('#res');try{R=solve();if(QX==null)QX=+(R.Ld/2).toFixed(4);o.innerHTML=show(R);qry()}catch(e){R=null;const m=typeof e=='string'?e:'Error: '+e.message;o.innerHTML=(D.sup.length||D.loads.length||D.hinges.length)?`<p class="err">${m}</p>`:'<p class="hint">Ingresa la longitud, E, I y los apoyos de la viga para ver los resultados.</p>'}}
 function exportPng(){if(!R)return;const p=draw(R,LT),hs=[170,165,165,165,165,165],tot=hs.reduce((a,b)=>a+b,0);let y=0;
  const svg=HD(tot).replace(/ width="720" height="\d+"/,` width="720" height="${tot}"`)+`<rect width="720" height="${tot}" fill="#fff"/>`+p.map((s,i)=>{const r=s.replace('<svg ',`<svg y="${y}" `);y+=hs[i];return r}).join('')+'</svg>';
  const im=new Image();im.onload=()=>{const c=document.createElement('canvas');c.width=1440;c.height=tot*2;c.getContext('2d').drawImage(im,0,0,1440,tot*2);
